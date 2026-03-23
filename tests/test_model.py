@@ -1,0 +1,259 @@
+"""Unit tests for model architecture — tensor shapes and model behavior."""
+import sys
+import os
+import torch
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+
+class TestProjectionBlock:
+    def test_output_shape(self):
+        from src.projection import ProjectionBlock
+        proj = ProjectionBlock(d_model=256)
+        B = 2
+        clip = torch.randn(B, 32, 512)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324)
+        scene = torch.randn(B, 32, 6)
+        mask = torch.zeros(B, 32, 5, dtype=torch.bool)
+
+        out = proj(clip, diff, obj, scene, mask)
+        assert out.shape == (B, 256, 256), f"Expected (2, 256, 256), got {out.shape}"
+
+    def test_pad_token_applied(self):
+        from src.projection import ProjectionBlock
+        proj = ProjectionBlock(d_model=256)
+        B = 1
+        clip = torch.randn(B, 32, 512)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324)
+        scene = torch.randn(B, 32, 6)
+        mask = torch.ones(B, 32, 5, dtype=torch.bool)  # all padded
+
+        out = proj(clip, diff, obj, scene, mask)
+        assert out.shape == (1, 256, 256)
+
+
+class TestTemporalPositionalEncoding:
+    def test_output_shape(self):
+        from src.projection import TemporalPositionalEncoding
+        pe = TemporalPositionalEncoding(num_frames=32, tokens_per_frame=8, d_model=256)
+        tokens = torch.randn(2, 256, 256)
+        out = pe(tokens)
+        assert out.shape == (2, 256, 256)
+
+    def test_adds_to_tokens(self):
+        from src.projection import TemporalPositionalEncoding
+        pe = TemporalPositionalEncoding(num_frames=32, tokens_per_frame=8, d_model=256)
+        tokens = torch.zeros(1, 256, 256)
+        out = pe(tokens)
+        # Output should not be all zeros (PE adds non-zero embeddings)
+        assert out.abs().sum() > 0
+
+
+class TestTransformerEncoder:
+    def test_output_shape(self):
+        from src.transformer import TemporalTransformerEncoder
+        enc = TemporalTransformerEncoder(d_model=256, num_heads=4, num_layers=4, ff_dim=512)
+        tokens = torch.randn(2, 256, 256)
+        out = enc(tokens)
+        assert out.shape == (2, 256, 256)
+
+    def test_with_padding_mask(self):
+        from src.transformer import TemporalTransformerEncoder, build_padding_mask
+        enc = TemporalTransformerEncoder(d_model=256, num_heads=4, num_layers=4, ff_dim=512)
+        tokens = torch.randn(2, 256, 256)
+        obj_mask = torch.zeros(2, 32, 5, dtype=torch.bool)
+        obj_mask[:, :, 3:] = True  # last 2 objects padded
+        padding_mask = build_padding_mask(obj_mask)
+        assert padding_mask.shape == (2, 256)
+        out = enc(tokens, src_key_padding_mask=padding_mask)
+        assert out.shape == (2, 256, 256)
+
+
+class TestCrossAttentionFusion:
+    def test_output_shape(self):
+        from src.cross_attention import CrossAttentionFusion
+        ca = CrossAttentionFusion(d_model=256, num_heads=4)
+        queries = torch.randn(2, 32, 256)
+        kv_pool = torch.randn(2, 192, 256)
+        fused, weights = ca(queries, kv_pool)
+        assert fused.shape == (2, 32, 256)
+        assert weights.shape == (2, 32, 192)
+
+    def test_attention_weights_stored(self):
+        from src.cross_attention import CrossAttentionFusion
+        ca = CrossAttentionFusion(d_model=256, num_heads=4)
+        queries = torch.randn(1, 32, 256)
+        kv_pool = torch.randn(1, 192, 256)
+        ca(queries, kv_pool)
+        assert ca._last_attn_weights is not None
+        assert ca._last_attn_weights.shape == (1, 32, 192)
+
+    def test_with_padding_mask(self):
+        from src.cross_attention import CrossAttentionFusion
+        ca = CrossAttentionFusion(d_model=256, num_heads=4)
+        queries = torch.randn(2, 32, 256)
+        kv_pool = torch.randn(2, 192, 256)
+        kv_mask = torch.zeros(2, 192, dtype=torch.bool)
+        kv_mask[:, 150:160] = True
+        fused, weights = ca(queries, kv_pool, key_padding_mask=kv_mask)
+        assert fused.shape == (2, 32, 256)
+
+
+class TestOutputHeads:
+    def test_activity_head(self):
+        from src.output_heads import ActivityClassificationHead
+        head = ActivityClassificationHead(d_model=256, num_classes=157)
+        fused = torch.randn(2, 32, 256)
+        logits = head(fused)
+        assert logits.shape == (2, 157)
+
+    def test_localization_head(self):
+        from src.output_heads import LocalizationHead
+        head = LocalizationHead(d_model=256)
+        fused = torch.randn(2, 32, 256)
+        preds = head(fused)
+        assert preds.shape == (2, 32, 2)
+        assert preds.min() >= 0.0 and preds.max() <= 1.0
+
+    def test_scene_graph_head(self):
+        from src.output_heads import SceneGraphHead
+        head = SceneGraphHead(d_model=256, num_relations=11)
+        fused = torch.randn(2, 32, 256)
+        obj_tokens = torch.randn(2, 32, 5, 256)
+        logits = head(fused, obj_tokens)
+        assert logits.shape == (2, 32, 20, 11)
+
+
+class TestLossFunctions:
+    def test_activity_loss(self):
+        from src.output_heads import activity_loss
+        logits = torch.randn(4, 157, requires_grad=True)
+        targets = torch.zeros(4, 157)
+        targets[:, 0] = 1.0
+        loss = activity_loss(logits, targets)
+        assert loss.requires_grad
+        assert loss.item() > 0
+
+    def test_localization_loss(self):
+        from src.output_heads import localization_loss
+        preds = torch.randn(4, 32, 2).sigmoid()
+        targets = torch.rand(4, 32, 2)
+        mask = torch.zeros(4, 32, dtype=torch.bool)
+        mask[:, 5:15] = True
+        loss = localization_loss(preds, targets, mask)
+        assert loss.item() >= 0
+
+    def test_localization_loss_empty_mask(self):
+        from src.output_heads import localization_loss
+        preds = torch.randn(4, 32, 2).sigmoid()
+        targets = torch.rand(4, 32, 2)
+        mask = torch.zeros(4, 32, dtype=torch.bool)
+        loss = localization_loss(preds, targets, mask)
+        assert loss.item() == 0.0
+
+    def test_scene_graph_loss(self):
+        from src.output_heads import scene_graph_loss
+        logits = torch.randn(4, 32, 20, 11, requires_grad=True)
+        targets = torch.full((4, 32, 20), -1, dtype=torch.long)
+        targets[:, :, 0] = 0  # set some valid targets
+        loss = scene_graph_loss(logits, targets)
+        assert loss.requires_grad
+
+    def test_total_loss(self):
+        from src.output_heads import total_loss
+        act_logits = torch.randn(4, 157, requires_grad=True)
+        loc_preds = torch.rand(4, 32, 2).requires_grad_(True)
+        sg_logits = torch.randn(4, 32, 20, 11, requires_grad=True)
+        act_targets = torch.zeros(4, 157)
+        loc_targets = torch.rand(4, 32, 2)
+        act_mask = torch.zeros(4, 32, dtype=torch.bool)
+        act_mask[:, 5:15] = True
+        sg_targets = torch.full((4, 32, 20), -1, dtype=torch.long)
+        sg_targets[:, :, 0] = 0
+
+        loss, components = total_loss(
+            act_logits, loc_preds, sg_logits,
+            act_targets, loc_targets, act_mask, sg_targets
+        )
+        assert loss.requires_grad
+        assert "activity" in components
+        assert "localization" in components
+        assert "scene_graph" in components
+
+
+class TestFullModel:
+    def test_forward_pass(self):
+        from src.model import SceneActivityModel
+        model = SceneActivityModel(
+            d_model=256, num_frames=32, tokens_per_frame=8, k=5,
+            num_heads=4, num_transformer_layers=4, ff_dim=512,
+            num_activity_classes=157, num_relations=11,
+        )
+        B = 2
+        clip = torch.randn(B, 32, 512)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324)
+        scene = torch.randn(B, 32, 6)
+        mask = torch.zeros(B, 32, 5, dtype=torch.bool)
+
+        act, loc, sg, attn = model(clip, diff, obj, scene, mask)
+
+        assert act.shape == (B, 157), f"act shape: {act.shape}"
+        assert loc.shape == (B, 32, 2), f"loc shape: {loc.shape}"
+        assert sg.shape == (B, 32, 20, 11), f"sg shape: {sg.shape}"
+        assert attn.shape == (B, 32, 192), f"attn shape: {attn.shape}"
+
+    def test_gradient_flow(self):
+        from src.model import SceneActivityModel
+        from src.output_heads import total_loss
+
+        model = SceneActivityModel()
+        B = 2
+        clip = torch.randn(B, 32, 512)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324)
+        scene = torch.randn(B, 32, 6)
+        mask = torch.zeros(B, 32, 5, dtype=torch.bool)
+
+        act_logits, loc_preds, sg_logits, _ = model(clip, diff, obj, scene, mask)
+
+        act_targets = torch.zeros(B, 157)
+        loc_targets = torch.rand(B, 32, 2)
+        act_mask = torch.ones(B, 32, dtype=torch.bool)
+        sg_targets = torch.zeros(B, 32, 20, dtype=torch.long)
+
+        loss, _ = total_loss(
+            act_logits, loc_preds, sg_logits,
+            act_targets, loc_targets, act_mask, sg_targets
+        )
+        loss.backward()
+
+        # Check gradients exist for trainable components
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                assert param.grad is not None, f"No gradient for {name}"
+
+    def test_parameter_count(self):
+        from src.model import SceneActivityModel
+        model = SceneActivityModel()
+        total = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        # Expected ~3.4M trainable parameters (doc 00)
+        assert 2_000_000 < total < 5_000_000, f"Trainable params: {total:,}"
+
+    def test_attention_weights_accessible(self):
+        from src.model import SceneActivityModel
+        model = SceneActivityModel()
+        B = 1
+        clip = torch.randn(B, 32, 512)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324)
+        scene = torch.randn(B, 32, 6)
+        mask = torch.zeros(B, 32, 5, dtype=torch.bool)
+
+        model(clip, diff, obj, scene, mask)
+        weights = model.get_attention_weights()
+        assert weights is not None
+        assert weights.shape == (1, 32, 192)
