@@ -13,22 +13,22 @@ class ProjectionBlock(nn.Module):
     """Projects all four feature streams to the shared D=256 embedding space
     and assembles them into a single token sequence."""
 
-    def __init__(self, d_model=256):
+    def __init__(self, clip_dim=768, d_model=256):
         super().__init__()
         self.d_model = d_model
 
         # Stream projections (doc 06 table)
-        self.video_proj = nn.Linear(512, d_model)   # Stream 1: CLIP CLS
-        self.motion_proj = nn.Linear(49, d_model)    # Stream 2: frame diff
-        self.object_proj = nn.Linear(324, d_model)   # Stream 3: DETR objects
-        self.scene_proj = nn.Linear(6, d_model)      # Stream 4: scene probs
+        self.video_proj = nn.Linear(clip_dim, d_model)  # Stream 1: CLIP CLS (768)
+        self.motion_proj = nn.Linear(49, d_model)        # Stream 2: frame diff
+        self.object_proj = nn.Linear(324, d_model)       # Stream 3: DETR objects
+        self.scene_proj = nn.Linear(6, d_model)          # Stream 4: scene probs
 
         # Learned [PAD] token for missing object detections (doc 04)
         self.pad_token = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, clip_feat, diff_feat, obj_feat, scene_feat, obj_mask):
         """
-        clip_feat:  [B, 32, 512]
+        clip_feat:  [B, 32, 768]
         diff_feat:  [B, 32, 49]
         obj_feat:   [B, 32, 5, 324]
         scene_feat: [B, 32, 6]

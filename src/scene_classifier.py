@@ -38,7 +38,7 @@ PLACES365_TO_SCENE = {
 class SceneClassifier(nn.Module):
     """6-class scene classifier on CLIP CLS tokens."""
 
-    def __init__(self, input_dim=512, num_classes=NUM_SCENE_CLASSES):
+    def __init__(self, input_dim=768, num_classes=NUM_SCENE_CLASSES):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, 128),

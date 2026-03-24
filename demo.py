@@ -23,6 +23,24 @@ from src.output_heads import RELATION_CLASSES, decode_segments, decode_triplets
 OBJECT_CLASSES = ["person", "chair", "table", "cup", "phone", "book", "laptop", "door"]
 
 
+def load_class_mapping(filepath):
+    """Load Charades_v1_classes.txt to map int IDs to English labels."""
+    mapping = {}
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                parts = line.split(" ", 1)
+                if len(parts) == 2 and parts[0].startswith("c"):
+                    try:
+                        cls_id = int(parts[0][1:])
+                        mapping[cls_id] = parts[1]
+                    except ValueError:
+                        pass
+    return mapping
+
+
 def load_features(features_dir):
     """Load precomputed features for a single video."""
     clip_feat = torch.load(os.path.join(features_dir, "clip.pt"), weights_only=True)
@@ -46,7 +64,7 @@ def load_features(features_dir):
     )
 
 
-def plot_activity_timeline(act_probs, loc_preds, out_path, threshold=0.3):
+def plot_activity_timeline(act_probs, loc_preds, out_path, cls_map=None, threshold=0.3):
     """Visualization 1: Activity timeline bar chart."""
     act_probs_np = act_probs.numpy()
     loc_preds_np = loc_preds.numpy()  # [32, 2]
@@ -64,6 +82,8 @@ def plot_activity_timeline(act_probs, loc_preds, out_path, threshold=0.3):
         prob = act_probs_np[cls_idx]
         t_start = loc_preds_np[:, 0].mean()
         t_end = loc_preds_np[:, 1].mean()
+        
+        cls_name = cls_map[cls_idx][:40] + "..." if cls_map and cls_idx in cls_map and len(cls_map[cls_idx]) > 40 else (cls_map.get(cls_idx) if cls_map and cls_idx in cls_map else f"Class {cls_idx}")
 
         ax.barh(
             i, t_end - t_start, left=t_start,
@@ -72,7 +92,7 @@ def plot_activity_timeline(act_probs, loc_preds, out_path, threshold=0.3):
         )
         ax.text(
             t_start + 0.01, i,
-            f"Activity {cls_idx} (p={prob:.2f})",
+            f"{cls_name} (p={prob:.2f})",
             va="center", fontsize=9, fontweight="bold",
         )
 
@@ -81,7 +101,7 @@ def plot_activity_timeline(act_probs, loc_preds, out_path, threshold=0.3):
     ax.set_ylabel("Activities", fontsize=11)
     ax.set_title("Activity Timeline", fontsize=13, fontweight="bold")
     ax.set_yticks(range(len(active_classes)))
-    ax.set_yticklabels([f"Class {c}" for c in active_classes])
+    ax.set_yticklabels([cls_map.get(c, f"Class {c}") if cls_map else f"Class {c}" for c in active_classes])
     ax.invert_yaxis()
 
     # Add frame markers at 32 positions
@@ -191,10 +211,14 @@ def main():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--frame_idx", type=int, default=16,
                         help="Frame index for scene graph visualization")
+    parser.add_argument("--cls_map", type=str, default="data/Charades_v1_classes.txt",
+                        help="Path to classes map file")
     args = parser.parse_args()
 
     device = torch.device(args.device)
     os.makedirs(args.out_dir, exist_ok=True)
+    
+    cls_map = load_class_mapping(args.cls_map)
 
     # Load model
     model = SceneActivityModel()
@@ -232,6 +256,7 @@ def main():
     plot_activity_timeline(
         act_probs, loc_preds_cpu,
         os.path.join(args.out_dir, "activity_timeline.png"),
+        cls_map=cls_map
     )
     plot_scene_graph(
         sg_logits_cpu, obj_feat_cpu, args.frame_idx,
@@ -249,12 +274,16 @@ def main():
     top_activities = act_probs.topk(5)
     print("Top-5 predicted activities:")
     for i in range(5):
-        print(f"  Class {top_activities.indices[i].item()}: p={top_activities.values[i].item():.3f}")
+        cls_idx = top_activities.indices[i].item()
+        prob = top_activities.values[i].item()
+        cls_name = cls_map.get(cls_idx, f"Class {cls_idx}")
+        print(f"  {cls_name} (Class {cls_idx}): p={prob:.3f}")
 
     segments = decode_segments(loc_preds_cpu, act_probs)
     print(f"\nTemporal segments: {len(segments)} detected")
     for cls_idx, t_start, t_end in segments[:5]:
-        print(f"  Class {cls_idx}: [{t_start:.3f}, {t_end:.3f}]")
+        cls_name = cls_map.get(cls_idx, f"Class {cls_idx}")
+        print(f"  {cls_name} (Class {cls_idx}): [{t_start:.3f}, {t_end:.3f}]")
 
 
 if __name__ == "__main__":

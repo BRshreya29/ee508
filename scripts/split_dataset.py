@@ -42,7 +42,7 @@ def main():
         video_ids, strat_keys,
         test_size=0.30,
         random_state=args.seed,
-        stratify=strat_keys,
+        # removed stratify to avoid ValueError on classes with 1 example
     )
 
     # Second split: 50/50 of the 30% → 15% val, 15% test
@@ -50,7 +50,6 @@ def main():
         temp_ids,
         test_size=0.50,
         random_state=args.seed,
-        stratify=temp_keys,
     )
 
     split = {

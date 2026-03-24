@@ -67,35 +67,41 @@ def prepare_temporal_labels(video_ann, num_classes=157):
     return temporal
 
 
-def prepare_scene_graph_labels(video_ann):
-    """Extract per-frame scene graph triplets.
-
-    Returns:
-        dict mapping frame_id → list of (subj_idx, pred_idx, obj_idx) tuples
-    """
+def prepare_scene_graph_labels(video_ann, vid, frame_indices_map):
+    """Extract per-frame scene graph triplets and map to sequence indices (0-31)."""
     frames = video_ann.get("frames", {})
     sg_labels = {}
+    
+    indices = frame_indices_map.get(vid, [])
+    if not indices:
+        return sg_labels
 
-    for frame_id, frame_ann in frames.items():
-        triplets = []
+    for frame_id_str, frame_ann in frames.items():
+        try:
+            raw_frame_id = int(frame_id_str)
+        except ValueError:
+            continue
+            
+        # Find closest sequence index 0-31
+        closest_seq_idx = min(range(len(indices)), key=lambda i: abs(indices[i] - raw_frame_id))
+        seq_idx_str = str(closest_seq_idx)
+        
+        if seq_idx_str not in sg_labels:
+            sg_labels[seq_idx_str] = []
+
         relations = frame_ann.get("relations", [])
-
         for rel in relations:
-            subj_class = rel.get("subject_class", "").lower().strip()
-            obj_class = rel.get("object_class", "").lower().strip()
+            subj_id = rel.get("subject_id")
+            obj_id = rel.get("object_id")
             predicate = rel.get("predicate", "").lower().strip()
 
-            if (subj_class in OBJ_TO_IDX
-                    and obj_class in OBJ_TO_IDX
+            if (subj_id is not None and obj_id is not None
                     and predicate in REL_TO_IDX):
-                triplets.append([
-                    OBJ_TO_IDX[subj_class],
+                sg_labels[seq_idx_str].append([
+                    int(subj_id),
                     REL_TO_IDX[predicate],
-                    OBJ_TO_IDX[obj_class],
+                    int(obj_id),
                 ])
-
-        if triplets:
-            sg_labels[frame_id] = triplets
 
     return sg_labels
 
@@ -109,12 +115,18 @@ def main():
 
     with open(args.annotations, "r") as f:
         annotations = json.load(f)
+        
+    frame_indices_path = "data/frame_indices.json"
+    frame_indices_map = {}
+    if os.path.exists(frame_indices_path):
+        with open(frame_indices_path, "r") as f:
+            frame_indices_map = json.load(f)
 
     all_labels = {}
     for vid, video_ann in annotations.items():
         activity = prepare_activity_labels(video_ann, args.num_activity_classes)
         temporal = prepare_temporal_labels(video_ann, args.num_activity_classes)
-        scene_graph = prepare_scene_graph_labels(video_ann)
+        scene_graph = prepare_scene_graph_labels(video_ann, vid, frame_indices_map)
 
         all_labels[vid] = {
             "activity": activity,

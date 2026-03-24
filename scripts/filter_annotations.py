@@ -82,8 +82,14 @@ def main():
         with open(args.out, "w") as f: json.dump({}, f)
         return
 
-    # 1. Load activities
-    video_activities = parse_charades_csv(args.charades_csv)
+    # 1. Load activities from both Train and Test CSVs if they exist
+    video_activities = {}
+    for csv_file in ["data/Charades_v1_train.csv", "data/Charades_v1_test.csv"]:
+        if os.path.exists(csv_file):
+            print(f"Parsing activities from {csv_file}...")
+            video_activities.update(parse_charades_csv(csv_file))
+        else:
+            print(f"Warning: {csv_file} not found. Some activity labels may be missing.")
 
     # 2. Extract Data
     video_frames = defaultdict(dict)
