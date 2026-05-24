@@ -280,16 +280,3 @@ python3 demo.py \
     --checkpoint   checkpoints/best_map_model.pt \
     --out_dir      demo_output/<VIDEO_ID>
 ```
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|---|---|
-| `cloudflared` QUIC timeout | Script already uses `--protocol http2` — re-run once |
-| `FileExistsError` on symlink in Colab | `os.unlink('/content/ee508')` then re-run the cell |
-| Videos not found | Check: `ls -la data/charades_videos/` — verify symlink or folder exists |
-| `filter_annotations.py` produces empty output | Annotations must be `.pkl` files in `data/action_genome/annotations/` |
-| OOM during DETR extraction on Colab | Reduce batch size in extraction cell, restart runtime, re-run — resume guard skips completed videos |
-| `Found no NVIDIA driver` error | You are on CPU — feature extraction still works, just slower. Add `device = torch.device("cpu")` at top of the script |
