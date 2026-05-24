@@ -8,6 +8,7 @@ Reference: doc 00 — Demo (End of Project).
 """
 import os
 import sys
+import json
 import argparse
 import torch
 import numpy as np
@@ -213,6 +214,10 @@ def main():
                         help="Frame index for scene graph visualization")
     parser.add_argument("--cls_map", type=str, default="data/Charades_v1_classes.txt",
                         help="Path to classes map file")
+    parser.add_argument("--seg_threshold", type=float, default=0.15,
+                        help="Min probability to consider a class active for segmentation (default 0.15)")
+    parser.add_argument("--top_k_segs", type=int, default=5,
+                        help="Fallback: number of top-k segments to always show if nothing exceeds threshold")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -279,11 +284,33 @@ def main():
         cls_name = cls_map.get(cls_idx, f"Class {cls_idx}")
         print(f"  {cls_name} (Class {cls_idx}): p={prob:.3f}")
 
-    segments = decode_segments(loc_preds_cpu, act_probs)
-    print(f"\nTemporal segments: {len(segments)} detected")
-    for cls_idx, t_start, t_end in segments[:5]:
+    # Look up video duration from annotations for real-second timestamps.
+    # Duration is stored in seconds in filtered_annotations.json.
+    # (set by filter_annotations.py from Charades CSV 'length' field)
+    video_id = os.path.basename(os.path.normpath(args.features_dir))
+    video_duration = None
+    ann_path = "data/filtered_annotations.json"
+    if os.path.exists(ann_path):
+        with open(ann_path) as f:
+            all_ann = json.load(f)
+        dur = all_ann.get(video_id, {}).get("duration")
+        if dur is not None:
+            video_duration = round(float(dur), 1)  # already in seconds
+
+    segments = decode_segments(
+        loc_preds_cpu, act_probs,
+        threshold=args.seg_threshold,
+        video_duration=video_duration,
+        top_k_fallback=args.top_k_segs,
+    )
+    unit = "s" if video_duration else ""
+    dur_str = f" (video duration: {video_duration}s)" if video_duration else ""
+    print(f"\nTemporal segments{dur_str}:")
+    print(f"  {len(segments)} detected")
+    for cls_idx, t_start, t_end in segments[:10]:
         cls_name = cls_map.get(cls_idx, f"Class {cls_idx}")
-        print(f"  {cls_name} (Class {cls_idx}): [{t_start:.3f}, {t_end:.3f}]")
+        prob = act_probs[cls_idx].item()
+        print(f"  {cls_name} (Class {cls_idx}, p={prob:.3f}): [{t_start}{unit} – {t_end}{unit}]")
 
 
 if __name__ == "__main__":

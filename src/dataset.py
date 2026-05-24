@@ -1,6 +1,5 @@
-"""Step 7 — PyTorch Dataset and DataLoader for precomputed features.
+"""PyTorch Dataset and DataLoader for precomputed features.
 
-Reference: doc 01 Step 7.
 Reads cached .pt feature files at training time. No video file is opened.
 """
 import os

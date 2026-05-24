@@ -1,10 +1,10 @@
-"""Full model wrapper — SceneActivityModel.
+"""Full model — SceneActivityModel.
 
-Assembles all stages:
-  Stage B1: ProjectionBlock + TemporalPositionalEncoding
-  Stage B2: TemporalTransformerEncoder
-  Stage B3: CrossAttentionFusion
-  Stage C:  ActivityClassificationHead, LocalizationHead, SceneGraphHead
+Assembles all modules:
+  ProjectionBlock + TemporalPositionalEncoding
+  TemporalTransformerEncoder
+  CrossAttentionFusion
+  ActivityClassificationHead, LocalizationHead, SceneGraphHead
 """
 import torch
 import torch.nn as nn
@@ -48,7 +48,7 @@ class SceneActivityModel(nn.Module):
         self.tokens_per_frame = tokens_per_frame
         self.k = k
 
-        # Stage B1 — Projection + Positional Encoding
+        # Projection + Positional Encoding
         self.projection = ProjectionBlock(d_model=d_model)
         self.pos_encoding = TemporalPositionalEncoding(
             num_frames=num_frames,
@@ -56,7 +56,7 @@ class SceneActivityModel(nn.Module):
             d_model=d_model,
         )
 
-        # Stage B2 — Temporal Transformer Encoder
+        # Temporal Transformer Encoder
         self.transformer = TemporalTransformerEncoder(
             d_model=d_model,
             num_heads=num_heads,
@@ -65,14 +65,14 @@ class SceneActivityModel(nn.Module):
             dropout=dropout,
         )
 
-        # Stage B3 — Cross-Attention Fusion
+        # Cross-Attention Fusion
         self.cross_attention = CrossAttentionFusion(
             d_model=d_model,
             num_heads=num_heads,
             dropout=dropout,
         )
 
-        # Stage C — Output Heads
+        # Output Heads
         self.activity_head = ActivityClassificationHead(
             d_model=d_model,
             num_classes=num_activity_classes,
@@ -92,7 +92,7 @@ class SceneActivityModel(nn.Module):
         """
         clip_feat:  [B, 32, 512]
         diff_feat:  [B, 32, 49]
-        obj_feat:   [B, 32, 5, 324]
+        obj_feat:   [B, 32, 5, 324]  — first 4 dims are normalised bbox coords
         scene_feat: [B, 32, 6]
         obj_mask:   [B, 32, 5] — True where object is padding
 
@@ -102,30 +102,38 @@ class SceneActivityModel(nn.Module):
             sg_logits:      [B, 32, 20, num_relations]
             attn_weights:   [B, 32, 192]
         """
-        # Stage B1: project and add positional encoding
-        tokens = self.projection(clip_feat, diff_feat, obj_feat, scene_feat, obj_mask)
+        # Extract bbox coords before projection (first 4 dims: cx, cy, w, h)
+        bbox_coords = obj_feat[..., :4]  # [B, 32, 5, 4]
+
+        # Project all streams and add positional encoding.
+        # ProjectionBlock also returns combined_mask (obj_mask | low-conf mask)
+        tokens, combined_mask = self.projection(
+            clip_feat, diff_feat, obj_feat, scene_feat, obj_mask
+        )
         tokens = self.pos_encoding(tokens)  # [B, 256, 256]
 
-        # Build padding mask for Transformer
-        padding_mask = build_padding_mask(obj_mask)  # [B, 256]
+        # Build padding mask for Transformer using confidence-gated combined_mask
+        padding_mask = build_padding_mask(combined_mask)  # [B, 256]
 
-        # Stage B2: Temporal Transformer
+        # Temporal Transformer
         encoder_output = self.transformer(tokens, src_key_padding_mask=padding_mask)
 
-        # Stage B3: prepare queries/KV and run cross-attention
+        # Prepare queries/KV and run cross-attention
         queries, kv_pool, object_tokens = prepare_cross_attention_inputs(
             encoder_output,
             num_frames=self.num_frames,
             tokens_per_frame=self.tokens_per_frame,
             k=self.k,
         )
-        kv_mask = build_kv_padding_mask(obj_mask, num_frames=self.num_frames, k=self.k)
+        kv_mask = build_kv_padding_mask(combined_mask, num_frames=self.num_frames, k=self.k)
         fused, attn_weights = self.cross_attention(queries, kv_pool, key_padding_mask=kv_mask)
 
         # Stage C: Output heads
-        act_logits = self.activity_head(fused)                         # [B, 157]
-        loc_preds = self.localization_head(fused)                      # [B, 32, 2]
-        sg_logits = self.scene_graph_head(fused, object_tokens)        # [B, 32, 20, 11]
+        act_logits = self.activity_head(fused)                              # [B, 157]
+        loc_preds = self.localization_head(fused)                           # [B, 32, 2]
+        sg_logits = self.scene_graph_head(
+            fused, object_tokens, bbox_coords=bbox_coords
+        )                                                                   # [B, 32, 20, 11]
 
         return act_logits, loc_preds, sg_logits, attn_weights
 

@@ -1,10 +1,9 @@
-"""Stage B3 — Cross-Attention Fusion.
+"""Cross-Attention Fusion.
 
-Reference: doc 08 — Cross-Attention Fusion.
 - Q = temporal summary tokens (mean-pooled per frame) [B, 32, 256]
 - KV = object + scene tokens from encoder output  [B, 192, 256]
 - 4-head scaled dot-product attention
-- _last_attn_weights stored for interpretability (required deliverable)
+- _last_attn_weights stored for interpretability
 """
 import torch
 import torch.nn as nn

@@ -36,16 +36,24 @@ def load_pickle_robust(path):
         return pickle.load(f, encoding="latin1")
 
 def parse_charades_csv(csv_path):
-    """Parse Charades CSV for video-level activities."""
-    activities = defaultdict(list)
+    """Parse Charades CSV for video-level activities and real video length."""
+    activities  = defaultdict(list)
+    durations   = {}          # vid → length in seconds (from CSV 'length' field)
     if not os.path.exists(csv_path):
-        return activities
+        return activities, durations
     print(f"Loading activities from {csv_path}...")
     import csv
     with open(csv_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             vid = row.get("id", "")
+            # Real video length — Charades stores this as seconds
+            length_str = row.get("length", "").strip()
+            if length_str:
+                try:
+                    durations[vid] = float(length_str)
+                except ValueError:
+                    pass
             actions = row.get("actions", "")
             if not actions: continue
             for act in actions.split(";"):
@@ -59,7 +67,7 @@ def parse_charades_csv(csv_path):
                         "start": float(parts[1]),
                         "end": float(parts[2])
                     })
-    return activities
+    return activities, durations
 
 def main():
     parser = argparse.ArgumentParser(description="Filter AG annotations to working taxonomy")
@@ -84,10 +92,13 @@ def main():
 
     # 1. Load activities from both Train and Test CSVs if they exist
     video_activities = {}
+    video_durations  = {}   # vid → real length in seconds from CSV
     for csv_file in ["data/Charades_v1_train.csv", "data/Charades_v1_test.csv"]:
         if os.path.exists(csv_file):
             print(f"Parsing activities from {csv_file}...")
-            video_activities.update(parse_charades_csv(csv_file))
+            acts, durs = parse_charades_csv(csv_file)
+            video_activities.update(acts)
+            video_durations.update(durs)
         else:
             print(f"Warning: {csv_file} not found. Some activity labels may be missing.")
 
@@ -176,7 +187,8 @@ def main():
         if orig_frames > 0 and len(surviving_frames) / orig_frames >= MIN_SURVIVING_RATIO:
             filtered[vid] = {
                 "activities": video_activities.get(vid, []),
-                "duration": len(surviving_frames) / 30.0, # Approximate duration if missing
+                # Use real video length from CSV; fall back to frame-count estimate
+                "duration": video_durations.get(vid, len(surviving_frames) / 30.0),
                 "frames": surviving_frames
             }
             kept_videos += 1

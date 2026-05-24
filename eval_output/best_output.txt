@@ -1,0 +1,175 @@
+# Step 1: resplit to 3200/200/200
+python3 -c "
+import json, random; random.seed(42)
+s = json.load(open('data/split.json'))
+all_vids = s['train'] + s['val'] + s['test']
+random.shuffle(all_vids)
+new = {'train': all_vids[:3200], 'val': all_vids[3200:3400], 'test': all_vids[3400:]}
+[print(f'{k}: {len(v)}') for k, v in new.items()]
+json.dump(new, open('data/split.json','w'))
+"
+
+# Step 2: retrain frozen backbone with focal loss (after I implement it)
+python3 train.py --resume checkpoints/best_model.pt --freeze_backbone --epochs 20
+
+# Step 3: run new eval to see improved active-class metrics
+python3 eval_objects.py --checkpoint checkpoints/best_model.pt
+train: 3200
+val: 200
+test: 328
+Device: cpu
+/home/shreya/studies/project/ee508/src/transformer.py:37: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(
+Resumed from epoch 1
+Frozen: ['transformer', 'cross_attention', 'projection', 'pos_encoding']
+Trainable parameters after freeze: 137,066
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 1/20 [90.4s] train_loss=0.5767 val_loss=0.5782 mAP=0.1649 act=0.2911 loc=0.0222 sg=0.9349
+  → Saved best model (val_loss=0.5782)
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 2/20 [116.2s] train_loss=0.5727 val_loss=0.5785 mAP=0.1670 act=0.2910 loc=0.0221 sg=0.9360
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 3/20 [105.1s] train_loss=0.5701 val_loss=0.5786 mAP=0.1689 act=0.2909 loc=0.0221 sg=0.9371
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 4/20 [130.5s] train_loss=0.5665 val_loss=0.5794 mAP=0.1737 act=0.2904 loc=0.0221 sg=0.9415
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 5/20 [121.3s] train_loss=0.5657 val_loss=0.5792 mAP=0.1774 act=0.2902 loc=0.0221 sg=0.9411
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 6/20 [118.2s] train_loss=0.5621 val_loss=0.5825 mAP=0.1810 act=0.2900 loc=0.0220 sg=0.9527
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 7/20 [130.0s] train_loss=0.5601 val_loss=0.5806 mAP=0.1848 act=0.2896 loc=0.0220 sg=0.9478
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 8/20 [110.1s] train_loss=0.5607 val_loss=0.5801 mAP=0.1845 act=0.2895 loc=0.0220 sg=0.9464
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 9/20 [127.0s] train_loss=0.5599 val_loss=0.5809 mAP=0.1850 act=0.2893 loc=0.0220 sg=0.9499
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 10/20 [113.9s] train_loss=0.5566 val_loss=0.5838 mAP=0.1890 act=0.2892 loc=0.0220 sg=0.9601
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 11/20 [114.4s] train_loss=0.5552 val_loss=0.5828 mAP=0.1904 act=0.2890 loc=0.0220 sg=0.9575
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 12/20 [107.2s] train_loss=0.5532 val_loss=0.5829 mAP=0.1892 act=0.2889 loc=0.0220 sg=0.9577
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 13/20 [119.2s] train_loss=0.5501 val_loss=0.5854 mAP=0.1925 act=0.2888 loc=0.0220 sg=0.9666
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 14/20 [131.5s] train_loss=0.5502 val_loss=0.5835 mAP=0.1931 act=0.2888 loc=0.0220 sg=0.9605
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 15/20 [127.4s] train_loss=0.5469 val_loss=0.5825 mAP=0.1923 act=0.2887 loc=0.0220 sg=0.9575
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 16/20 [121.6s] train_loss=0.5462 val_loss=0.5826 mAP=0.1947 act=0.2886 loc=0.0220 sg=0.9577
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 17/20 [122.6s] train_loss=0.5445 val_loss=0.5824 mAP=0.1960 act=0.2886 loc=0.0220 sg=0.9574
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 18/20 [121.4s] train_loss=0.5453 val_loss=0.5821 mAP=0.1963 act=0.2886 loc=0.0220 sg=0.9563
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 19/20 [120.4s] train_loss=0.5453 val_loss=0.5822 mAP=0.1957 act=0.2885 loc=0.0220 sg=0.9568
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Epoch 20/20 [120.4s] train_loss=0.5422 val_loss=0.5816 mAP=0.1969 act=0.2885 loc=0.0220 sg=0.9551
+Training complete.
+/home/shreya/studies/project/ee508/src/transformer.py:37: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(
+Loaded checkpoint: checkpoints/best_model.pt  (saved at epoch 0)
+Evaluating split='test'  (328 videos) ...
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Collected 328 videos of data.
+
+──────────────────────────────────────────────────────────────────────
+  RELATION CLASSIFICATION (per predicate)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  background                  100.0     0.0     0.0     0.0       0      0      0
+  sitting on                   75.5    56.6    66.4    61.1     657    503    332
+  standing on                  99.5    46.9    93.8    62.5      15     17      1
+  holding                     100.0     0.0     0.0     0.0       0      0      0
+  looking at                   98.7     0.0     0.0     0.0       0      0     43
+  eating                      100.0     0.0     0.0     0.0       0      0      0
+  next to                     100.0     0.0     0.0     0.0       0      0      0
+  in front of                  72.7    80.2    59.9    68.6    1019    251    681
+  behind                       92.4    37.5    27.5    31.7      60    100    158
+  lying on                     99.9     0.0     0.0     0.0       0      1      3
+  leaning on                   82.8    40.7    72.6    52.2     321    467    121
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                            23.8    29.1    25.1
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_relations.png
+Saved: eval_output/bar_relations.png
+
+──────────────────────────────────────────────────────────────────────
+  RELATION CLASSIFICATION — 7 active classes only (recommended)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  sitting on                   75.5    56.6    66.4    61.1     657    503    332
+  standing on                  99.5    46.9    93.8    62.5      15     17      1
+  looking at                   98.7     0.0     0.0     0.0       0      0     43
+  in front of                  72.7    80.2    59.9    68.6    1019    251    681
+  behind                       92.4    37.5    27.5    31.7      60    100    158
+  lying on                     99.9     0.0     0.0     0.0       0      1      3
+  leaning on                   82.8    40.7    72.6    52.2     321    467    121
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                            37.4    45.8    39.5
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_relations_active.png
+Saved: eval_output/bar_relations_active.png
+
+──────────────────────────────────────────────────────────────────────
+  OBJECT CLASS — Relation Detection Rate (precision/recall vs GT)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  person                        6.3     6.3   100.0    11.8    2390  35840      0
+  chair                         2.3     2.3   100.0     4.4     136   5903      0
+  table                         0.3     0.3   100.0     0.5       4   1472      0
+  cup                           1.2     1.2   100.0     2.4      28   2271      0
+  phone                         1.9     1.9   100.0     3.8      22   1120      0
+  book                          0.7     0.7   100.0     1.4      13   1798      0
+  laptop                       10.7    10.7   100.0    19.3     158   1325      0
+  door                          0.0     0.0     0.0     0.0       0      0      0
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                             2.9    87.5     5.4
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_objects.png
+Saved: eval_output/bar_objects.png
+
+══════════════════════════════════════════════════════════════════════
+  SUMMARY
+══════════════════════════════════════════════════════════════════════
+  Videos evaluated             : 328
+  -- ALL 11 RELATION CLASSES --
+  Relation macro-precision     : 23.8%
+  Relation macro-recall        : 29.1%
+  Relation macro-F1            : 25.1%
+  Relation overall accuracy    : 60.7%
+  -- 7 ACTIVE CLASSES ONLY (recommended) --
+  Active macro-precision       : 37.4%
+  Active macro-recall          : 45.8%
+  Active macro-F1              : 39.5%
+  Active overall accuracy      : 60.7%
+
+  Object macro-precision       : 2.9%
+  Object macro-recall          : 87.5%
+  Object macro-F1              : 5.4%
+══════════════════════════════════════════════════════════════════════
+
+All plots saved to: eval_output/

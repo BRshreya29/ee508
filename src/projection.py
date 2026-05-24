@@ -1,6 +1,5 @@
-"""Stage B1 — Linear Projection & Temporal Positional Encoding.
+"""Linear Projection & Temporal Positional Encoding.
 
-Reference: doc 06 — Linear Projection.
 - Four independent linear layers mapping each stream to D=256
 - Learned [PAD] token for missing object detections
 - Learned frame-index positional encoding (32 positions)
@@ -9,13 +8,25 @@ import torch
 import torch.nn as nn
 
 
+# Minimum L2 norm for a DETR object feature to be treated as a real detection.
+# Slots with norm below this threshold are masked as padding, preventing the
+# model from attending to low-confidence detections.
+_CONF_THRESH_L2 = 1.5
+
+
 class ProjectionBlock(nn.Module):
     """Projects all four feature streams to the shared D=256 embedding space
-    and assembles them into a single token sequence."""
+    and assembles them into a single token sequence.
 
-    def __init__(self, clip_dim=768, d_model=256):
+    Object confidence gating: DETR slots whose raw feature L2 norm falls below
+    `conf_thresh_l2` are treated as padding (OR-ed into obj_mask) so the model
+    does not attend to low-confidence detections.
+    """
+
+    def __init__(self, clip_dim=768, d_model=256, conf_thresh_l2=_CONF_THRESH_L2):
         super().__init__()
         self.d_model = d_model
+        self.conf_thresh_l2 = conf_thresh_l2
 
         # Stream projections (doc 06 table)
         self.video_proj = nn.Linear(clip_dim, d_model)  # Stream 1: CLIP CLS (768)
@@ -43,13 +54,19 @@ class ProjectionBlock(nn.Module):
         m = self.motion_proj(diff_feat)     # [B, 32, 256]
         s = self.scene_proj(scene_feat)     # [B, 32, 256]
 
+        # Object confidence gating: mask slots where the raw feature norm is
+        # too low to represent a real DETR detection.
+        feat_norm = obj_feat.norm(dim=-1)                          # [B, 32, 5]
+        low_conf_mask = feat_norm < self.conf_thresh_l2            # [B, 32, 5]
+        combined_mask = obj_mask | low_conf_mask                   # [B, 32, 5]
+
         # Object tokens: [B, 32, 5, 256]
         o = self.object_proj(obj_feat)
 
-        # Replace padded object slots with learned pad token
+        # Replace padded / low-confidence object slots with learned pad token
         pad = self.pad_token.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # [1, 1, 1, 256]
         pad = pad.expand(B, T, K, self.d_model)
-        o = torch.where(obj_mask.unsqueeze(-1), pad, o)
+        o = torch.where(combined_mask.unsqueeze(-1), pad, o)
 
         # Assemble per-frame token groups: [v | m | o1..o5 | s]
         tokens = torch.cat([
@@ -61,7 +78,9 @@ class ProjectionBlock(nn.Module):
 
         # Flatten to sequence: [B, 256, 256]
         tokens = tokens.view(B, T * 8, self.d_model)
-        return tokens
+        # Return combined mask so callers can propagate confidence gating
+        # downstream (e.g. into build_kv_padding_mask).
+        return tokens, combined_mask
 
 
 class TemporalPositionalEncoding(nn.Module):

@@ -1,6 +1,5 @@
-"""Stage B2 — Temporal Transformer Encoder.
+"""Temporal Transformer Encoder.
 
-Reference: doc 07 — Temporal Transformer.
 - 4-layer vanilla Transformer encoder
 - 4 attention heads, D=256, FF dim=512
 - Pre-norm (norm_first=True), GELU activation

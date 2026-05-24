@@ -12,27 +12,45 @@ class TestProjectionBlock:
         from src.projection import ProjectionBlock
         proj = ProjectionBlock(d_model=256)
         B = 2
-        clip = torch.randn(B, 32, 512)
+        clip = torch.randn(B, 32, 768)
         diff = torch.randn(B, 32, 49)
         obj = torch.randn(B, 32, 5, 324)
         scene = torch.randn(B, 32, 6)
         mask = torch.zeros(B, 32, 5, dtype=torch.bool)
 
-        out = proj(clip, diff, obj, scene, mask)
-        assert out.shape == (B, 256, 256), f"Expected (2, 256, 256), got {out.shape}"
+        tokens, combined_mask = proj(clip, diff, obj, scene, mask)
+        assert tokens.shape == (B, 256, 256), f"Expected (2, 256, 256), got {tokens.shape}"
+        assert combined_mask.shape == (B, 32, 5), f"Expected combined_mask (2, 32, 5), got {combined_mask.shape}"
 
     def test_pad_token_applied(self):
         from src.projection import ProjectionBlock
         proj = ProjectionBlock(d_model=256)
         B = 1
-        clip = torch.randn(B, 32, 512)
+        clip = torch.randn(B, 32, 768)
         diff = torch.randn(B, 32, 49)
         obj = torch.randn(B, 32, 5, 324)
         scene = torch.randn(B, 32, 6)
         mask = torch.ones(B, 32, 5, dtype=torch.bool)  # all padded
 
-        out = proj(clip, diff, obj, scene, mask)
-        assert out.shape == (1, 256, 256)
+        tokens, combined_mask = proj(clip, diff, obj, scene, mask)
+        assert tokens.shape == (1, 256, 256)
+        # All slots padded → combined_mask should be all True
+        assert combined_mask.all()
+
+    def test_low_conf_gating(self):
+        """Low-norm object features should be gated even without explicit mask."""
+        from src.projection import ProjectionBlock
+        proj = ProjectionBlock(d_model=256, conf_thresh_l2=50.0)  # very high threshold
+        B = 1
+        clip = torch.randn(B, 32, 768)
+        diff = torch.randn(B, 32, 49)
+        obj = torch.randn(B, 32, 5, 324) * 0.001  # near-zero → low norm
+        scene = torch.randn(B, 32, 6)
+        mask = torch.zeros(B, 32, 5, dtype=torch.bool)  # no explicit padding
+
+        _tokens, combined_mask = proj(clip, diff, obj, scene, mask)
+        # All objects have near-zero norm → should all be gated
+        assert combined_mask.all(), "Low-norm objects should be masked by confidence gating"
 
 
 class TestTemporalPositionalEncoding:
@@ -126,6 +144,16 @@ class TestOutputHeads:
         logits = head(fused, obj_tokens)
         assert logits.shape == (2, 32, 20, 11)
 
+    def test_scene_graph_head_with_bbox(self):
+        """SceneGraphHead should accept optional bbox_coords and output same shape."""
+        from src.output_heads import SceneGraphHead
+        head = SceneGraphHead(d_model=256, num_relations=11)
+        fused = torch.randn(2, 32, 256)
+        obj_tokens = torch.randn(2, 32, 5, 256)
+        bbox_coords = torch.rand(2, 32, 5, 4)  # (cx, cy, w, h) in [0, 1]
+        logits = head(fused, obj_tokens, bbox_coords=bbox_coords)
+        assert logits.shape == (2, 32, 20, 11)
+
 
 class TestLossFunctions:
     def test_activity_loss(self):
@@ -136,6 +164,22 @@ class TestLossFunctions:
         loss = activity_loss(logits, targets)
         assert loss.requires_grad
         assert loss.item() > 0
+
+    def test_focal_loss_down_weights_easy_negatives(self):
+        """Focal loss should give lower loss to very confident correct predictions."""
+        from src.output_heads import activity_loss
+        # High-confidence correct prediction (logit=10 for target=1)
+        logits_easy = torch.tensor([[10.0] + [0.0] * 156])
+        targets_easy = torch.tensor([[1.0] + [0.0] * 156])
+        # Low-confidence correct prediction (logit=0.1 for target=1)
+        logits_hard = torch.tensor([[0.1] + [0.0] * 156])
+        targets_hard = torch.tensor([[1.0] + [0.0] * 156])
+        loss_easy = activity_loss(logits_easy, targets_easy)
+        loss_hard = activity_loss(logits_hard, targets_hard)
+        # Easy (confident) examples should have lower loss due to focal weighting
+        assert loss_easy.item() < loss_hard.item(), (
+            f"Focal loss should down-weight easy: easy={loss_easy:.4f} hard={loss_hard:.4f}"
+        )
 
     def test_localization_loss(self):
         from src.output_heads import localization_loss
@@ -193,7 +237,7 @@ class TestFullModel:
             num_activity_classes=157, num_relations=11,
         )
         B = 2
-        clip = torch.randn(B, 32, 512)
+        clip = torch.randn(B, 32, 768)
         diff = torch.randn(B, 32, 49)
         obj = torch.randn(B, 32, 5, 324)
         scene = torch.randn(B, 32, 6)
@@ -212,7 +256,7 @@ class TestFullModel:
 
         model = SceneActivityModel()
         B = 2
-        clip = torch.randn(B, 32, 512)
+        clip = torch.randn(B, 32, 768)
         diff = torch.randn(B, 32, 49)
         obj = torch.randn(B, 32, 5, 324)
         scene = torch.randn(B, 32, 6)
@@ -247,7 +291,7 @@ class TestFullModel:
         from src.model import SceneActivityModel
         model = SceneActivityModel()
         B = 1
-        clip = torch.randn(B, 32, 512)
+        clip = torch.randn(B, 32, 768)
         diff = torch.randn(B, 32, 49)
         obj = torch.randn(B, 32, 5, 324)
         scene = torch.randn(B, 32, 6)

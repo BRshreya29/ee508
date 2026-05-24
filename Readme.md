@@ -163,7 +163,7 @@ Training can also run in the Colab notebook (Step 6 of the notebook) if you pref
 ```bash
 python3 demo.py \
     --features_dir features/001YG \
-    --checkpoint   checkpoints/best_model.pt \
+    --checkpoint   checkpoints/best_map_model.pt \
     --out_dir      demo_output
 ```
 
@@ -182,7 +182,7 @@ Outputs three files in `demo_output/`:
 ```bash
 # Unit tests — no data needed, runs on synthetic tensors
 python3 -m pytest tests/ -v
-# Expected: 36/36 passed
+# Expected: 24/24 passed
 
 # End-to-end smoke test — synthetic data
 python3 scripts/smoke_test.py
@@ -217,6 +217,9 @@ ee508/
 ├── src/                        model architecture
 ├── train.py
 ├── demo.py
+├── video_demo/                 ← sample demo recordings
+│   ├── demo1.webm
+│   └── demo2.webm
 ├── EE508_Colab.ipynb
 ├── requirements.txt
 └── tests/
@@ -249,7 +252,34 @@ Video → sample 32 frames
  (mAP)       (mIoU)        (Recall@20)
 ```
 
-Trainable parameters: ~3.4M. All backbone weights stay frozen.
+Trainable parameters: ~3.14M. All backbone weights stay frozen.
+
+Best checkpoint: `checkpoints/best_map_model.pt` — mAP **21.37%** on test set (328 videos).
+
+---
+
+## Video Demos
+
+Two sample inference recordings are in [`video_demo/`](video_demo/):
+
+| File | Description |
+|---|---|
+| `demo1.webm` | Model inference on a kitchen/living-room activity clip |
+| `demo2.webm` | Model inference on a second home-activity clip |
+
+Each demo shows the three outputs produced by `demo.py`:
+- **Activity timeline** — predicted activities with temporal extents
+- **Scene graph** — object nodes and predicted spatial relations
+- **Attention heatmap** — which objects the model attends to per frame
+
+To run inference on your own video's pre-extracted features:
+
+```bash
+python3 demo.py \
+    --features_dir features/<VIDEO_ID> \
+    --checkpoint   checkpoints/best_map_model.pt \
+    --out_dir      demo_output/<VIDEO_ID>
+```
 
 ---
 

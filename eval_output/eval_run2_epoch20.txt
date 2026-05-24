@@ -1,0 +1,88 @@
+/home/shreya/studies/project/ee508/src/transformer.py:37: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(
+/home/shreya/.local/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+Loaded checkpoint: checkpoints/best_model.pt  (saved at epoch 19)
+Evaluating split='test'  (328 videos) ...
+Collected 328 videos of data.
+
+──────────────────────────────────────────────────────────────────────
+  RELATION CLASSIFICATION (per predicate)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  background                  100.0     0.0     0.0     0.0       0      0      0
+  sitting on                   74.0    54.4    64.0    58.8     633    530    356
+  standing on                  99.3    40.5    93.8    56.6      15     22      1
+  holding                     100.0     0.0     0.0     0.0       0      0      0
+  looking at                   98.7     0.0     0.0     0.0       0      0     43
+  eating                      100.0     0.0     0.0     0.0       0      0      0
+  next to                     100.0     0.0     0.0     0.0       0      0      0
+  in front of                  72.0    80.8    57.6    67.2     979    233    721
+  behind                       92.2    36.4    28.9    32.2      63    110    155
+  lying on                     99.9     0.0     0.0     0.0       0      2      3
+  leaning on                   82.1    39.7    74.0    51.7     327    497    115
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                            22.9    28.9    24.2
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_relations.png
+Saved: eval_output/bar_relations.png
+
+──────────────────────────────────────────────────────────────────────
+  RELATION CLASSIFICATION — 7 active classes only (recommended)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  sitting on                   74.0    54.4    64.0    58.8     633    530    356
+  standing on                  99.3    40.5    93.8    56.6      15     22      1
+  looking at                   98.7     0.0     0.0     0.0       0      0     43
+  in front of                  72.0    80.8    57.6    67.2     979    233    721
+  behind                       92.2    36.4    28.9    32.2      63    110    155
+  lying on                     99.9     0.0     0.0     0.0       0      2      3
+  leaning on                   82.1    39.7    74.0    51.7     327    497    115
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                            36.0    45.5    38.1
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_relations_active.png
+Saved: eval_output/bar_relations_active.png
+
+──────────────────────────────────────────────────────────────────────
+  OBJECT CLASS — Relation Detection Rate (precision/recall vs GT)
+──────────────────────────────────────────────────────────────────────
+  Class                        Acc%   Prec%    Rec%     F1%      TP     FP     FN
+──────────────────────────────────────────────────────────────────────
+  person                        6.3     6.3   100.0    11.8    2390  35840      0
+  chair                         2.3     2.3   100.0     4.4     136   5903      0
+  table                         0.3     0.3   100.0     0.5       4   1472      0
+  cup                           1.2     1.2   100.0     2.4      28   2271      0
+  phone                         1.9     1.9   100.0     3.8      22   1120      0
+  book                          0.7     0.7   100.0     1.4      13   1798      0
+  laptop                       10.7    10.7   100.0    19.3     158   1325      0
+  door                          0.0     0.0     0.0     0.0       0      0      0
+──────────────────────────────────────────────────────────────────────
+  MACRO AVG                             2.9    87.5     5.4
+──────────────────────────────────────────────────────────────────────
+Saved: eval_output/cm_objects.png
+Saved: eval_output/bar_objects.png
+
+══════════════════════════════════════════════════════════════════════
+  SUMMARY
+══════════════════════════════════════════════════════════════════════
+  Videos evaluated             : 328
+  -- ALL 11 RELATION CLASSES --
+  Relation macro-precision     : 22.9%
+  Relation macro-recall        : 28.9%
+  Relation macro-F1            : 24.2%
+  Relation overall accuracy    : 59.1%
+  -- 7 ACTIVE CLASSES ONLY (recommended) --
+  Active macro-precision       : 36.0%
+  Active macro-recall          : 45.5%
+  Active macro-F1              : 38.1%
+  Active overall accuracy      : 59.1%
+
+  Object macro-precision       : 2.9%
+  Object macro-recall          : 87.5%
+  Object macro-F1              : 5.4%
+══════════════════════════════════════════════════════════════════════
+
+All plots saved to: eval_output/

@@ -2,10 +2,12 @@
 """Training script for the SceneActivityModel.
 
 Reference: doc 07 (training setup), doc 09 (joint loss).
-- AdamW with per-group LR: projection 1e-4, transformer 5e-5, heads 1e-4
+- AdamW with per-group LR: projection 1e-4, transformer 2e-5, heads 5e-5 (default)
 - Weight decay 1e-4, gradient clipping max_norm=1.0
-- Linear warmup (5 epochs) + CosineAnnealingLR
-- 50 epochs, logging per-task losses + mAP/mIoU/R@20
+- Linear warmup (5 epochs) + ReduceLROnPlateau watching mAP
+- 80 epochs, logging per-task losses + mAP/mIoU/R@20
+- Saves best_model.pt (min val_loss) AND best_map_model.pt (max mAP) separately
+  so best_model.pt is NEVER overwritten by the mAP-best checkpoint.
 """
 import os
 import sys
@@ -14,7 +16,7 @@ import time
 import json
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 sys.path.insert(0, os.path.dirname(__file__))
 from src.model import SceneActivityModel
@@ -22,17 +24,46 @@ from src.dataset import get_dataloader
 from src.output_heads import total_loss
 
 
-def build_optimizer(model, lr_proj=1e-4, lr_transformer=5e-5, lr_heads=1e-4, weight_decay=1e-4):
-    """Build AdamW optimizer with per-group learning rates (doc 07)."""
-    param_groups = [
-        {"params": model.projection.parameters(), "lr": lr_proj, "name": "projection"},
-        {"params": model.pos_encoding.parameters(), "lr": lr_proj, "name": "pos_encoding"},
-        {"params": model.transformer.parameters(), "lr": lr_transformer, "name": "transformer"},
-        {"params": model.cross_attention.parameters(), "lr": lr_proj, "name": "cross_attn"},
-        {"params": model.activity_head.parameters(), "lr": lr_heads, "name": "activity_head"},
-        {"params": model.localization_head.parameters(), "lr": lr_heads, "name": "loc_head"},
-        {"params": model.scene_graph_head.parameters(), "lr": lr_heads, "name": "sg_head"},
-    ]
+def freeze_backbone(model):
+    """Freeze transformer + cross-attention so only heads are updated.
+
+    Call after loading a checkpoint. The frozen modules still run forward
+    passes (gradients are just detached), so no inference code changes.
+    """
+    frozen_modules = [model.transformer, model.cross_attention,
+                      model.projection, model.pos_encoding]
+    for module in frozen_modules:
+        for p in module.parameters():
+            p.requires_grad = False
+    frozen_names = ["transformer", "cross_attention", "projection", "pos_encoding"]
+    print(f"Frozen: {frozen_names}")
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable parameters after freeze: {trainable:,}")
+
+
+def build_optimizer(model, lr_proj=1e-4, lr_transformer=2e-5, lr_heads=5e-5, weight_decay=1e-3):
+    """Build AdamW optimizer with per-group learning rates (doc 07).
+
+    Only param groups with requires_grad=True params are included,
+    so freeze_backbone() interacts cleanly with this function.
+    """
+    def _params(module):
+        return [p for p in module.parameters() if p.requires_grad]
+
+    param_groups = []
+    if _params(model.projection):
+        param_groups.append({"params": _params(model.projection),    "lr": lr_proj,        "name": "projection"})
+    if _params(model.pos_encoding):
+        param_groups.append({"params": _params(model.pos_encoding),  "lr": lr_proj,        "name": "pos_encoding"})
+    if _params(model.transformer):
+        param_groups.append({"params": _params(model.transformer),   "lr": lr_transformer, "name": "transformer"})
+    if _params(model.cross_attention):
+        param_groups.append({"params": _params(model.cross_attention), "lr": lr_proj,       "name": "cross_attn"})
+    param_groups.append({"params": _params(model.activity_head),      "lr": lr_heads,       "name": "activity_head"})
+    param_groups.append({"params": _params(model.localization_head),  "lr": lr_heads,       "name": "loc_head"})
+    param_groups.append({"params": _params(model.scene_graph_head),   "lr": lr_heads,       "name": "sg_head"})
+    # Drop empty groups (frozen modules)
+    param_groups = [g for g in param_groups if len(g["params"]) > 0]
     return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
 
 
@@ -174,12 +205,23 @@ def main():
     parser.add_argument("--labels_file", type=str, default="data/labels.json")
     parser.add_argument("--features_root", type=str, default="features")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=80,
+                        help="Max epochs; early stopping may terminate earlier.")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument("--freeze_backbone", action="store_true",
+                        help="Freeze projection+transformer+cross_attention; only train the 3 output heads.")
+    # LR / regularisation overrides
+    parser.add_argument("--lr_proj", type=float, default=1e-4)
+    parser.add_argument("--lr_transformer", type=float, default=2e-5)
+    parser.add_argument("--lr_heads", type=float, default=5e-5)
+    parser.add_argument("--weight_decay", type=float, default=1e-3,
+                        help="L2 weight decay (default 1e-3, 10× original 1e-4).")
+    parser.add_argument("--early_stop_patience", type=int, default=12,
+                        help="Stop training if mAP does not improve for this many epochs.")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -197,41 +239,59 @@ def main():
 
     # Model
     model = SceneActivityModel().to(device)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Trainable parameters: {total_params:,}")
 
-    # Optimizer & scheduler
-    optimizer = build_optimizer(model)
-    # Store initial LR for warmup
-    for pg in optimizer.param_groups:
-        pg["initial_lr"] = pg["lr"]
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - args.warmup_epochs, eta_min=1e-6)
-
+    # Resume checkpoint BEFORE building optimizer so frozen state is respected
     start_epoch = 0
     best_val_loss = float("inf")
-
-    # Resume
+    best_mAP = 0.0
     if args.resume and os.path.exists(args.resume):
         ckpt = torch.load(args.resume, map_location=device)
         model.load_state_dict(ckpt["model"])
-        optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch = ckpt.get("epoch", 0) + 1
         best_val_loss = ckpt.get("best_val_loss", float("inf"))
+        best_mAP = ckpt.get("mAP", 0.0)
         print(f"Resumed from epoch {start_epoch}")
+
+    # Optionally freeze backbone AFTER loading weights
+    if args.freeze_backbone:
+        freeze_backbone(model)
+    else:
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Trainable parameters: {total_params:,}")
+
+    # Optimizer — built after freeze so excluded params are skipped
+    optimizer = build_optimizer(
+        model,
+        lr_proj=args.lr_proj,
+        lr_transformer=args.lr_transformer,
+        lr_heads=args.lr_heads,
+        weight_decay=args.weight_decay,
+    )
+    # Store initial LR for warmup
+    for pg in optimizer.param_groups:
+        pg["initial_lr"] = pg["lr"]
+
+    # ReduceLROnPlateau — decays LR when mAP stops improving.
+    # patience=3: react faster on a small dataset where plateaus are short.
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=3,
+        min_lr=1e-7,
+    )
+    # Early-stopping state
+    epochs_no_improve = 0
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(start_epoch, start_epoch + args.epochs):
         t0 = time.time()
 
         # Train
         train_loss, train_comp = train_one_epoch(
             model, train_loader, optimizer, device, epoch, args.warmup_epochs
         )
-
-        # Step scheduler after warmup
-        if epoch >= args.warmup_epochs:
-            scheduler.step()
 
         # Evaluate
         val_loss, val_comp, mAP = evaluate(model, val_loader, device)
@@ -248,7 +308,7 @@ def main():
             f"sg={val_comp['scene_graph']:.4f}"
         )
 
-        # Save best
+        # ── Checkpoint 1: best val_loss (original best_model.pt — NEVER renamed) ──
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             ckpt_path = os.path.join(args.checkpoint_dir, "best_model.pt")
@@ -259,7 +319,32 @@ def main():
                 "best_val_loss": best_val_loss,
                 "mAP": mAP,
             }, ckpt_path)
-            print(f"  → Saved best model (val_loss={best_val_loss:.4f})")
+            print(f"  → Saved best_model.pt (val_loss={best_val_loss:.4f})")
+
+        # ── Checkpoint 2: best mAP (separate file — never overwrites best_model.pt) ──
+        if mAP > best_mAP:
+            best_mAP = mAP
+            epochs_no_improve = 0
+            map_ckpt_path = os.path.join(args.checkpoint_dir, "best_map_model.pt")
+            torch.save({
+                "epoch": epoch,
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "best_val_loss": best_val_loss,
+                "mAP": best_mAP,
+            }, map_ckpt_path)
+            print(f"  → Saved best_map_model.pt (mAP={best_mAP:.4f})")
+        else:
+            epochs_no_improve += 1
+
+        # ── Scheduler step: ReduceLROnPlateau watches mAP (skip during warmup) ──
+        if epoch >= args.warmup_epochs:
+            scheduler.step(mAP)
+
+        # ── Early stopping ──
+        if epochs_no_improve >= args.early_stop_patience:
+            print(f"Early stopping: no mAP improvement for {args.early_stop_patience} epochs.")
+            break
 
         # Save latest
         torch.save({
@@ -267,6 +352,7 @@ def main():
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "best_val_loss": best_val_loss,
+            "mAP": mAP,
         }, os.path.join(args.checkpoint_dir, "latest_model.pt"))
 
     print("Training complete.")

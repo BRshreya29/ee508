@@ -1,9 +1,8 @@
-"""Stage A4 — Scene Classifier (6-class MLP on CLIP CLS tokens).
+"""Scene Classifier: 6-class MLP on CLIP CLS tokens.
 
-Reference: doc 05 — Scene Classifier.
-- 2-layer MLP: Linear(512, 128) → GELU → Dropout(0.2) → Linear(128, 6)
-- Trained offline on Places365 subset before main training run
-- At inference: frozen, produces [6] softmax probability per frame
+- 2-layer MLP: Linear(768, 128) → GELU → Dropout(0.2) → Linear(128, 6)
+- Trained offline on a Places365 subset
+- At inference: frozen, produces one [6] softmax probability vector per frame
 """
 import os
 import torch
